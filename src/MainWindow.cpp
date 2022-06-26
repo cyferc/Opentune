@@ -13,7 +13,7 @@ namespace
     const QString cWindowTitle = "Opentune";
 
     const QString cSection_Megatune = "MegaTune";
-    const QString cSection_TunerStudio = "TunerStudio";
+    const QString cSection_TStudio = "TunerStudio";
     const QString cSection_SettingGroups = "SettingGroups";
     const QString cSection_PcVariables = "PcVariables";
     const QString cSection_Constants = "Constants";
@@ -35,14 +35,7 @@ namespace
     const QString cSection_VeAnalyze = "VeAnalyze";
     const QString cSection_WueAnalyze = "WueAnalyze";
 
-    struct
-    {
-        float MTversion;
-        QChar queryCommand;
-        QString signature;
-        QString versionInfo;
-        float iniSpecVersion;
-    } iniProperties;
+    const QString cQuote('"');
 } // namespace
 
 
@@ -101,11 +94,10 @@ void MainWindow::openIniFile()
         return;
     }
 
+    QString section;
     int lineNum = 1;
     while (!file.atEnd())
     {
-        QString section;
-
         QByteArray line = file.readLine();
         line = line.trimmed(); // Remove start and end white spaces
 
@@ -154,8 +146,14 @@ void MainWindow::openIniFile()
         {
             processMegatuneKeyValue(key, value);
         }
-        else if (section == cSection_TunerStudio) {}
-        else if (section == cSection_SettingGroups) {}
+        else if (section == cSection_TStudio)
+        {
+            processTStudioKeyValue(key, value);
+        }
+        else if (section == cSection_SettingGroups)
+        {
+            processSettingGroupsKeyValue(key, value);
+        }
         else if (section == cSection_PcVariables) {}
         else if (section == cSection_Constants) {}
         else if (section == cSection_EventTriggers) {}
@@ -178,8 +176,8 @@ void MainWindow::openIniFile()
         ++lineNum;
     }
 
-    QFileInfo fileInfo(file);
-    setWindowTitle(fileInfo.fileName() + " - " + cWindowTitle);
+    //QFileInfo fileInfo(file);
+    //setWindowTitle(fileInfo.fileName() + " - " + cWindowTitle);
 }
 
 bool MainWindow::extractKey(QString &key, QByteArray line)
@@ -190,44 +188,129 @@ bool MainWindow::extractKey(QString &key, QByteArray line)
         return false;
     }
 
-    line.remove(line.indexOf('='), line.length() - equalsIndex);
+    line.remove(equalsIndex, line.length() - equalsIndex);
     key = line.trimmed();
     return true;
 }
 
 bool MainWindow::extractValue(QString &value, QByteArray line)
 {
+    // Remove any comment at the end
+    int commentIndex = line.indexOf(';');
+    if (commentIndex != -1)
+    {
+        line.remove(commentIndex, line.length() - commentIndex);
+    }
+
     int equalsIndex = line.indexOf('=');
     if (equalsIndex == -1)
     {
         return false;
     }
 
-    line.remove(0, line.indexOf('=') + 1);
+    line.remove(0, equalsIndex + 1);
     value = line.trimmed();
     return true;
+}
+
+QString MainWindow::removeQuotes(QString input)
+{
+    input.remove(cQuote);
+    return input;
 }
 
 void MainWindow::processMegatuneKeyValue(const QString key, const QString value)
 {
     if (key == "MTversion")
     {
-        iniProperties.MTversion = value.toFloat();
+        mTuneSection.MTversion = value.toFloat();
+        //qDebug() << "MTversion = '" + QString::number(mTuneSection.MTversion) + "'"; 
     }
     else if (key == "queryCommand")
     {
-        iniProperties.queryCommand = value.front();
+        mTuneSection.queryCommand = removeQuotes(value).front();
+        //qDebug() << "queryCommand = '" + QString(mTuneSection.queryCommand) + "'"; 
     }
     else if (key == "signature")
     {
-        iniProperties.signature = value;
+        mTuneSection.signature = removeQuotes(value);
+        //qDebug() << "signature = '" + mTuneSection.signature + "'"; 
+        setWindowTitle(mTuneSection.signature + " - " + cWindowTitle);
     }
     else if (key == "versionInfo")
     {
-        iniProperties.versionInfo = value;
+        mTuneSection.versionInfo = removeQuotes(value);
+        //qDebug() << "versionInfo = '" + mTuneSection.versionInfo + "'"; 
     }
-    else if (key == "iniSpecVersion")
+}
+
+void MainWindow::processTStudioKeyValue(const QString key, const QString value)
+{
+    if (key == "iniSpecVersion")
     {
-        iniProperties.iniSpecVersion = value.toFloat();
+        studioSection.iniSpecVersion = value.toFloat();
+        //qDebug() << "iniSpecVersion = '" + QString::number(mTuneSection.iniSpecVersion) + "'"; 
+    }
+}
+
+void MainWindow::processSettingGroupsKeyValue(const QString key, const QString value)
+{
+    static QString currentGroupRefName;
+    const QString tempCurrentGroupRefName = currentGroupRefName;
+    const int cIndexReferenceName = 0;
+    const int cIndexDisplayName = 1; 
+
+    auto splitValue = value.split(',');
+    if (splitValue.size() != 2)
+    {
+        qDebug() << "ERROR processSettingGroupsKeyValue";
+        return;
+    }
+
+    splitValue[cIndexReferenceName] = splitValue[cIndexReferenceName].trimmed();
+    splitValue[cIndexDisplayName] = splitValue[cIndexDisplayName].trimmed();
+    splitValue[cIndexDisplayName] = removeQuotes(splitValue[1]);
+
+    const QString cReferenceName = splitValue[cIndexReferenceName];
+    const QString cDisplayName = splitValue[cIndexDisplayName];
+
+    if (key == "settingGroup")
+    {
+        currentGroupRefName = splitValue[cIndexReferenceName];
+
+        std::vector<tSettingsGroupsSection::tGroup>::iterator iter;
+        iter = std::find_if(settingsGroupsSection.groups.begin(), settingsGroupsSection.groups.end(), [tempCurrentGroupRefName] (tSettingsGroupsSection::tGroup group) {
+            return tempCurrentGroupRefName == group.referenceName;
+        });
+
+        if (iter != settingsGroupsSection.groups.end())
+        {
+            // Update group
+            iter->displayName = cDisplayName;
+        }
+        else
+        {
+            // Add group
+            tSettingsGroupsSection::tGroup group;
+            group.referenceName = cReferenceName;
+            group.displayName = cDisplayName;
+            settingsGroupsSection.groups.emplace_back(group);
+        }
+    }
+    else if (key == "settingOption")
+    {
+        std::vector<tSettingsGroupsSection::tGroup>::iterator groupIter;
+        groupIter = std::find_if(settingsGroupsSection.groups.begin(), settingsGroupsSection.groups.end(), [tempCurrentGroupRefName] (tSettingsGroupsSection::tGroup group) {
+            return tempCurrentGroupRefName == group.referenceName;
+        });
+
+        if (groupIter != settingsGroupsSection.groups.end())
+        {
+            // Update group
+            std::vector<tSettingsGroupsSection::tGroup::tOption>::iterator optionIter;
+            optionIter = std::find_if(groupIter->options.begin(), groupIter->options.end(), [cReferenceName] (tSettingsGroupsSection::tGroup::tOption group) {
+                return cReferenceName == group.referenceName;
+            });
+        }
     }
 }
